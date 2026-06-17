@@ -1,0 +1,16 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.log
+*.db
+*.sqlite3
+.env
+.env.*
+!.env.example
+Dockerfile
+docker-compose.yml
+docker-entrypoint.sh
+README.md
