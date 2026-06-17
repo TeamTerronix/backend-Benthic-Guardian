@@ -24,6 +24,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
+from model_paths import MODEL_DIR as _MODEL_DIR_PATH
 from models import Prediction, Sensor, SensorReading
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 # ── Configuration ──────────────────────────────────────────────────────────────
 ARCHIVE_PATH   = os.path.join(os.path.dirname(__file__), "history_archive.csv")
 RETENTION_DAYS = 30
-_MODEL_DIR     = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "model"))
+_MODEL_DIR     = str(_MODEL_DIR_PATH)
 
 # ── Lazy forecaster loader (avoids importing TF at module import time) ─────────
 _forecaster = None

@@ -178,7 +178,9 @@ app.add_middleware(
 
 # ─── Paths ───
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = os.path.join(BASE_DIR, "..", "model")
+from model_paths import MODEL_DIR as _MODEL_DIR_PATH
+
+MODEL_DIR = str(_MODEL_DIR_PATH)
 DATASET_DIR = os.path.join(MODEL_DIR, "dataset")
 
 

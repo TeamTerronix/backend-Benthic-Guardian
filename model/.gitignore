@@ -1,0 +1,13 @@
+# Runtime PINN assets for standalone backend deploy (Render/Docker).
+# Sync from the model repo when weights change:
+#   python sync_model_assets.py
+# Or copy manually: forecaster.py, utils.py, *.h5, *.pkl, sliot_dataset/, CSV exports.
+
+# Large training-only files (not needed at API runtime)
+*.npy
+*.ipynb
+.ipynb_checkpoints/
+dataset/
+pinn_model_saved/
+*.png
+coral_reef_risk_map.html

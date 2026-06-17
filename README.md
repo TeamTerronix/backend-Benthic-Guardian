@@ -180,11 +180,47 @@ Server will start at:
 - Swagger docs: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
 
+## 7. Deploy on Render (backend repo only)
+
+Connect your **backend** GitHub repo directly — no monorepo required.
+
+### Prerequisites
+
+The repo must include **`model/`** with PINN runtime files (`pinn_model_best.h5`, `scalers.pkl`, etc.).
+
+If you develop in the monorepo, sync before push:
+
+```bash
+python sync_model_assets.py
+git add model/
+git commit -m "Sync PINN runtime assets"
+```
+
+### Render settings
+
+| Setting | Value |
+|---------|--------|
+| Runtime | Docker |
+| Root Directory | *(leave empty — repo root)* |
+| Dockerfile Path | `./Dockerfile` |
+| Health Check | `/` |
+| Plan | **Starter**+ (TensorFlow) |
+
+Or use **`render.yaml`** in this repo (Blueprint deploy).
+
+**Environment variables:** `DATABASE_URL` (Supabase), `SECRET_KEY`, `CORS_ORIGINS` (Vercel URL).
+
+### After deploy
+
+1. Vercel: `NEXT_PUBLIC_API_URL=https://<service>.onrender.com`
+2. ESP32: `POST https://<service>.onrender.com/data`
+3. `python provision_prototype.py --sensor-uid "1"` (local, against Supabase)
+
 ## Notes
 
 - Background scheduler jobs start automatically with the app (see `scheduler.py`).
 - `.env` is ignored by Git through `.gitignore`.
-- Some endpoints load CSV/model assets from a sibling `../model` directory. Make sure that folder exists if you use those endpoints.
+- PINN assets live in **`backend/model/`** (standalone repo) or sibling **`../model`** (monorepo). Override with `MODEL_DIR` if needed.
 
 ## Quick Health Check
 

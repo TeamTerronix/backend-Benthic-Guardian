@@ -1,7 +1,8 @@
 #!/bin/sh
+# Native Python start (Render without Docker). From backend/ directory:
+#   chmod +x start.sh && ./start.sh
 set -e
 
-echo "Creating database tables if needed..."
 python create_tables.py
 
 PORT="${PORT:-8000}"
