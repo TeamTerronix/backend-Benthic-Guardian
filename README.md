@@ -2,6 +2,8 @@
 
 FastAPI backend for temperature monitoring, predictions, auth, and scheduled jobs.
 
+**Deploying to production?** See **[RENDER_DEPLOYMENT.md](./RENDER_DEPLOYMENT.md)** — Render deploy guide (database already on Supabase).
+
 ## Prerequisites
 
 - Python 3.10+ (3.11 recommended)
