@@ -70,9 +70,19 @@ On a server (EC2), set `DATABASE_URL` to your **PostgreSQL / RDS** URL before ru
 
 ### Database options
 
+- **Supabase (recommended for production)**  
+  1. Create a project at [supabase.com](https://supabase.com)  
+  2. **Project Settings → Database → Connection string → URI** (Session pooler, port `5432`)  
+  3. Put it in `backend/.env` as `DATABASE_URL` (use `postgresql+psycopg://…`; URL-encode special characters in the password)  
+  4. Create tables and migrate existing data:
+     ```bash
+     python migrate_to_supabase.py --source sqlite:///./sliot.db
+     ```
+  5. Run the API with the same `DATABASE_URL`
+
 - SQLite (default, easiest local setup):
   - `DATABASE_URL=sqlite:///./sliot.db`
-- PostgreSQL (recommended for shared/dev/prod):
+- PostgreSQL (local Docker or RDS):
   - `DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/sliot`
 
 ## 5. Create Database Tables
@@ -81,6 +91,21 @@ Run once after setting `DATABASE_URL`:
 
 ```bash
 python create_tables.py
+```
+
+For **Supabase**, you can use `create_tables.py` or `migrate_to_supabase.py` (creates schema + copies data from SQLite).
+
+## 5a. Migrate to Supabase
+
+If you already have data in local SQLite (or another Postgres URL):
+
+```bash
+# 1. Set DATABASE_URL in .env to your Supabase URI
+# 2. Copy data:
+python migrate_to_supabase.py --source sqlite:///./sliot.db
+
+# Re-run on same target (replace all rows):
+python migrate_to_supabase.py --source sqlite:///./sliot.db --wipe-target
 ```
 
 ## 5b. (Schema updates) Run migrations scripts when needed
@@ -97,7 +122,7 @@ If ingest was changed from hourly to every sample, drop the old unique constrain
 python migrate_drop_sensor_readings_hourly_unique.py
 ```
 
-## 5a. (Optional) Seed the Database with Test Data
+## 5c. (Optional) Seed the Database with Test Data
 
 If you want test users/sensors/readings/predictions in your PostgreSQL DB for dashboard testing:
 
