@@ -14,9 +14,9 @@ scipy>=1.7.0
 sqlalchemy>=2.0.0
 psycopg[binary]>=3.2.0
 
-# Auth
+# Auth (bcrypt directly; passlib is incompatible with bcrypt 5.x on Linux/Render)
+bcrypt>=4.0.0,<5.0.0
 python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
 
 # Scheduling
 apscheduler>=3.10.0

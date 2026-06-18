@@ -717,26 +717,24 @@ def register(payload: UserCreate, db: Session = Depends(get_db)):
     """Create a new user account (self-service, role defaults to 'user')."""
     if db.query(User).filter(User.email == payload.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
-    user = User(
-        email=payload.email,
-        hashed_password=hash_password(payload.password),
-        role=UserRole.user,   # self-registration is always 'user'
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    # create the default network group and membership
-    ngid = f"ng_{uuid.uuid4().hex[:12]}"
-    if ngid:
-        if not db.query(NetworkGroup).filter(NetworkGroup.id == ngid).first():
-            db.add(NetworkGroup(id=ngid, name=None))
-            db.commit()
-        if not db.query(UserNetworkGroup).filter(
-            UserNetworkGroup.user_id == user.id,
-            UserNetworkGroup.network_group_id == ngid,
-        ).first():
-            db.add(UserNetworkGroup(user_id=user.id, network_group_id=ngid))
-            db.commit()
+    try:
+        user = User(
+            email=payload.email,
+            hashed_password=hash_password(payload.password),
+            role=UserRole.user,  # self-registration is always 'user'
+        )
+        db.add(user)
+        db.flush()
+
+        ngid = f"ng_{uuid.uuid4().hex[:12]}"
+        db.add(NetworkGroup(id=ngid, name=None))
+        db.add(UserNetworkGroup(user_id=user.id, network_group_id=ngid))
+        db.commit()
+        db.refresh(user)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Registration failed for %s", payload.email)
+        raise HTTPException(status_code=500, detail="Registration failed") from exc
     return user
 
 
