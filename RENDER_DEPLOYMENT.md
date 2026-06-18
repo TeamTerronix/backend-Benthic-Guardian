@@ -133,19 +133,24 @@ Test dashboard login (default prototype user, if the team provisioned it):
 
 ## Step 4 — Connect the Vercel dashboard
 
-In **Vercel** → dashboard project → **Settings** → **Environment Variables**:
+Full steps: see dashboard repo **`CONNECT_BACKEND.md`**.
+
+**Vercel** → Environment:
 
 ```env
-NEXT_PUBLIC_API_URL=https://YOUR-SERVICE.onrender.com
+NEXT_PUBLIC_API_URL=https://backend-benthic-guardian.onrender.com
 ```
 
-Rules:
+Redeploy the dashboard after saving.
 
-- **No trailing slash**
-- Use `https://`
-- Redeploy the dashboard after changing env vars
+**Render** → Environment (required for browser login from Vercel):
 
-WebSocket alerts work automatically when `NEXT_PUBLIC_API_URL` is `https://` (the app uses `wss://`).
+```env
+CORS_ORIGINS=https://YOUR-DASHBOARD.vercel.app
+CORS_ORIGIN_REGEX=https://.*\.vercel\.app
+```
+
+Replace `YOUR-DASHBOARD.vercel.app` with your real Vercel URL.
 
 ---
 
