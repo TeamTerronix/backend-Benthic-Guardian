@@ -182,6 +182,33 @@ Vercel dashboard  ──HTTPS API──┘
 
 ## Troubleshooting
 
+### Database not connected on Render (most common)
+
+The Docker image **does not include** `backend/.env`. You must set **`DATABASE_URL` in Render → Environment**.
+
+If `DATABASE_URL` is missing, the app used to silently fall back to **SQLite inside the container** (empty, not your Supabase data).
+
+After redeploying with the fix, check:
+
+```text
+https://YOUR-SERVICE.onrender.com/
+```
+
+Response should include `"database": "ok"`. If `"database": "error"`, fix `DATABASE_URL` on Render.
+
+**Correct value** (from team — Supabase session pooler, port **5432**):
+
+```env
+DATABASE_URL=postgresql+psycopg://postgres.pzjcvokjqvgbrrcrxipn:URL_ENCODED_PASSWORD@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres
+```
+
+Rules:
+
+- No quotes around the value in Render
+- Password special chars must be URL-encoded (`&` → `%26`, `!` → `%21`, `+` → `%2B`)
+- Use **session pooler (5432)**, not transaction (6543), unless you know you need it
+- `SECRET_KEY` on Render must match the key used when users were created in Supabase
+
 ### Build fails on Render
 
 - Confirm **`model/pinn_model_best.h5`** exists in the repo.

@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
 
+echo "Checking database connection..."
+python db_check.py
+
 echo "Creating database tables if needed..."
 python create_tables.py
 

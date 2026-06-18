@@ -34,7 +34,7 @@ from auth import (
     hash_password,
     verify_password,
 )
-from database import SessionLocal, get_db
+from database import SessionLocal, get_db, check_database_connection
 from models import Prediction, Sensor, SensorReading, User, UserRole, NetworkGroup, UserNetworkGroup
 from scheduler import create_scheduler
 
@@ -138,6 +138,12 @@ def _first_network_group_id_for_user(db: Session, user_id: int) -> Optional[str]
 # ── Lifespan: start/stop the background scheduler ─────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        check_database_connection()
+        logger.info("Database connection verified at startup")
+    except Exception as exc:
+        logger.error("Database connection failed at startup: %s", exc)
+        raise
     scheduler = create_scheduler()
     scheduler.start()
     yield
@@ -219,6 +225,7 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     timestamp: str
+    database: str
 
 
 class StatsResponse(BaseModel):
@@ -237,10 +244,16 @@ class StatsResponse(BaseModel):
 
 @app.get("/", response_model=HealthResponse)
 def health():
+    db_status = "ok"
+    try:
+        check_database_connection()
+    except Exception:
+        db_status = "error"
     return HealthResponse(
-        status="ok",
+        status="ok" if db_status == "ok" else "degraded",
         version="1.0.0",
         timestamp=datetime.utcnow().isoformat(),
+        database=db_status,
     )
 
 
