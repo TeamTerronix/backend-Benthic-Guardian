@@ -12,5 +12,4 @@ __pycache__
 !.env.example
 Dockerfile
 docker-compose.yml
-docker-entrypoint.sh
 README.md
