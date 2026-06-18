@@ -8,11 +8,11 @@ Usage:
     python create_tables.py
 """
 
-from database import engine, DATABASE_URL
+from database import engine, DATABASE_URL, mask_database_url
 from models import Base
 
 def main():
-    print(f"Connecting to: {DATABASE_URL}")
+    print(f"Connecting to: {mask_database_url(DATABASE_URL)}")
     Base.metadata.create_all(bind=engine)
     print("Tables created successfully:")
     for table_name in Base.metadata.tables:
