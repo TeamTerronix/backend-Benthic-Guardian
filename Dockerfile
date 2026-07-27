@@ -14,7 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Application + bundled PINN assets (backend/model/)
+# Application + bundled PINN + ANN–LSTM assets (backend/model/)
 COPY model/ ./model/
 COPY . .
 
