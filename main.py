@@ -9,6 +9,7 @@ from typing import List, Optional
 
 import logging
 import os
+import sys
 import threading
 import time
 import pandas as pd
@@ -1201,6 +1202,131 @@ def get_sensor_forecast(
         .order_by(Prediction.target_timestamp.asc())
         .all()
     )
+
+
+# ── ANN–LSTM short-term forecast (1 / 3 / 7 day) ──────────────────────────────
+
+class LSTMForecastPoint(BaseModel):
+    model: str = "ann_lstm_L60"
+    location: str
+    issue_time: str
+    horizon_days: int
+    target_date: str
+    sst_issue: float
+    dhw_issue: float
+    predicted_temp: float
+    sst_pred: float
+    dhw_pred: float
+    sst_persist: float
+    baseline_month_sst: float
+    anomaly: float
+    risk_score: float
+    risk_level: int
+    risk_name: str
+
+
+def _get_lstm():
+    if MODEL_DIR not in sys.path:
+        sys.path.insert(0, MODEL_DIR)
+    from lstm_forecaster import get_lstm_forecaster  # noqa: PLC0415
+
+    return get_lstm_forecaster()
+
+
+@app.get("/api/lstm-forecast", response_model=List[LSTMForecastPoint])
+def get_lstm_forecast(
+    location: str = Query("hikkaduwa", description="Reef site key"),
+    as_of: Optional[str] = Query(None, description="Optional ISO date (UTC)"),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    ANN–LSTM 60-day history → SST/DHW at +1, +3, +7 days.
+    Locations: hikkaduwa, kalpitiya, passikudha, south_east, trinco.
+    """
+    try:
+        lstm = _get_lstm()
+        as_of_dt = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        rows = lstm.forecast(location=location, as_of=as_of_dt)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("ANN–LSTM forecast failed")
+        raise HTTPException(status_code=500, detail=f"LSTM forecast failed: {exc}") from exc
+
+    return [
+        LSTMForecastPoint(
+            model=r["model"],
+            location=r["location"],
+            issue_time=r["issue_time"],
+            horizon_days=r["horizon_days"],
+            target_date=r["target_date"],
+            sst_issue=r["sst_issue"],
+            dhw_issue=r["dhw_issue"],
+            predicted_temp=r["predicted_temp"],
+            sst_pred=r["sst_pred"],
+            dhw_pred=r["dhw_pred"],
+            sst_persist=r["sst_persist"],
+            baseline_month_sst=r["baseline_month_sst"],
+            anomaly=r["anomaly"],
+            risk_score=r["risk_score"],
+            risk_level=r["risk_level"],
+            risk_name=r["risk_name"],
+        )
+        for r in rows
+    ]
+
+
+@app.get("/sensors/{sensor_id}/lstm-forecast", response_model=List[LSTMForecastPoint])
+def get_sensor_lstm_forecast(
+    sensor_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """ANN–LSTM forecast for the reef site nearest to this sensor."""
+    sensor = db.query(Sensor).filter(Sensor.id == sensor_id).first()
+    if not sensor:
+        raise HTTPException(status_code=404, detail="Sensor not found")
+    if current_user.role != UserRole.admin:
+        network_ids = _user_network_ids(db, current_user)
+        if not network_ids or sensor.network_group_id not in network_ids:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    from scheduler import _infer_location_from_sensor  # noqa: PLC0415
+
+    location = _infer_location_from_sensor(sensor)
+    try:
+        rows = _get_lstm().forecast(location=location, as_of=None)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("ANN–LSTM forecast failed for sensor %s", sensor_id)
+        raise HTTPException(status_code=500, detail=f"LSTM forecast failed: {exc}") from exc
+
+    return [
+        LSTMForecastPoint(
+            model=r["model"],
+            location=r["location"],
+            issue_time=r["issue_time"],
+            horizon_days=r["horizon_days"],
+            target_date=r["target_date"],
+            sst_issue=r["sst_issue"],
+            dhw_issue=r["dhw_issue"],
+            predicted_temp=r["predicted_temp"],
+            sst_pred=r["sst_pred"],
+            dhw_pred=r["dhw_pred"],
+            sst_persist=r["sst_persist"],
+            baseline_month_sst=r["baseline_month_sst"],
+            anomaly=r["anomaly"],
+            risk_score=r["risk_score"],
+            risk_level=r["risk_level"],
+            risk_name=r["risk_name"],
+        )
+        for r in rows
+    ]
 
 
 if __name__ == "__main__":

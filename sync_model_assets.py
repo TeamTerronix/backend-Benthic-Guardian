@@ -22,14 +22,23 @@ TARGET = BACKEND_DIR / "model"
 
 FILES = (
     "forecaster.py",
+    "lstm_forecaster.py",
+    "prepare_data.py",
     "utils.py",
     "scalers.pkl",
     "sensor_info.pkl",
     "pinn_model_best.h5",
+    "ann_lstm_L60_best.h5",
     "prediction_results.csv",
     "training_history.csv",
 )
 DIRS = ("sliot_dataset",)
+
+# Optional: also pull ANN–LSTM from lookback ablation folder when syncing
+EXTRA_LSTM_CANDIDATES = (
+    Path("lstm_lookback_ablation") / "ann_lstm_L60_best.h5",
+    Path("lstm_experiment") / "ann_lstm_best.h5",
+)
 
 
 def sync(source: Path) -> None:
@@ -56,6 +65,16 @@ def sync(source: Path) -> None:
             shutil.rmtree(dest)
         shutil.copytree(src, dest)
         print(f"  copied: {name}/")
+
+    # If ann_lstm was not at model root, try ablation / experiment folders
+    lstm_dest = TARGET / "ann_lstm_L60_best.h5"
+    if not lstm_dest.exists():
+        for rel in EXTRA_LSTM_CANDIDATES:
+            cand = source / rel
+            if cand.exists():
+                shutil.copy2(cand, lstm_dest)
+                print(f"  copied: {rel} → ann_lstm_L60_best.h5")
+                break
 
     print(f"Done. Assets in {TARGET}")
 
