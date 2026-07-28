@@ -1,0 +1,16 @@
+# Dev / CI test dependencies (no TensorFlow — inference paths are mocked in tests)
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.0.0
+python-multipart>=0.0.6
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.7.0
+scikit-learn>=1.0.0
+sqlalchemy>=2.0.0
+psycopg[binary]>=3.2.0
+bcrypt>=4.0.0,<5.0.0
+python-jose[cryptography]>=3.3.0
+apscheduler>=3.10.0
+pytest>=7.4.0
+httpx>=0.25.0

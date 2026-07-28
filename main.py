@@ -145,10 +145,14 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("Database connection failed at startup: %s", exc)
         raise
-    scheduler = create_scheduler()
-    scheduler.start()
+    scheduler = None
+    # Tests / local tooling can skip APScheduler (avoids PINN jobs during pytest).
+    if os.getenv("DISABLE_SCHEDULER", "").lower() not in ("1", "true", "yes"):
+        scheduler = create_scheduler()
+        scheduler.start()
     yield
-    scheduler.shutdown(wait=False)
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
 
 
 app = FastAPI(
