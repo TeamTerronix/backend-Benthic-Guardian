@@ -86,7 +86,7 @@ def decode_access_token(token: str) -> TokenData:
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithm=ALGORITHM)
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id_str: Optional[str] = payload.get("sub")
         if user_id_str is None:
             raise credentials_exception
