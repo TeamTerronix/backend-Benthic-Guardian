@@ -1097,11 +1097,16 @@ async def ingest_reading(
 
     # Broadcast bleaching alert to connected WS clients if threshold exceeded
     if payload.temperature >= BLEACHING_THRESHOLD:
+        location_name = (
+            sensor.network_group.name
+            if sensor.network_group and sensor.network_group.name
+            else sensor.sensor_uid
+        )
         alert = {
             "type": "bleaching_alert",
             "sensor_id": sensor.id,
             "sensor_uid": sensor.sensor_uid,
-            "location_name": sensor.sensor_uid,
+            "location_name": location_name,
             "temperature": round(payload.temperature, 2),
             "risk_level": 2,
             "timestamp": reading.timestamp.isoformat(),
