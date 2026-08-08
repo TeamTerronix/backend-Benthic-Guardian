@@ -496,7 +496,18 @@ def get_predictions(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    q = db.query(Prediction).order_by(Prediction.target_timestamp.asc())
+    """
+    Return PINN prediction rows for the caller's networks.
+
+    Prefer the recent window (from yesterday forward) so a LIMIT does not
+    return only old archived forecast days when many sensors are seeded.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+    q = (
+        db.query(Prediction)
+        .filter(Prediction.target_timestamp >= cutoff)
+        .order_by(Prediction.target_timestamp.asc())
+    )
     if current_user.role != UserRole.admin:
         network_ids = _user_network_ids(db, current_user)
         if not network_ids:
@@ -507,6 +518,21 @@ def get_predictions(
     if min_risk > 0:
         q = q.filter(Prediction.risk_score.isnot(None), Prediction.risk_score >= min_risk)
     items = q.limit(limit).all()
+
+    # If the recent window is empty (no scheduler yet), fall back to latest rows
+    if not items:
+        q2 = db.query(Prediction).order_by(Prediction.target_timestamp.desc())
+        if current_user.role != UserRole.admin:
+            network_ids = _user_network_ids(db, current_user)
+            if not network_ids:
+                return []
+            q2 = q2.join(Sensor, Sensor.id == Prediction.sensor_id).filter(
+                Sensor.network_group_id.in_(network_ids)
+            )
+        if min_risk > 0:
+            q2 = q2.filter(Prediction.risk_score.isnot(None), Prediction.risk_score >= min_risk)
+        items = list(reversed(q2.limit(limit).all()))
+
     return [
         {
             "sensor_id": p.sensor_id,
