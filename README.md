@@ -2,6 +2,20 @@
 
 FastAPI backend for temperature monitoring, predictions, auth, and scheduled jobs.
 
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| **[SLIOT_Backend_Documentation.docx](./docs/SLIOT_Backend_Documentation.docx)** | Full technical documentation — architecture diagrams, ERD, API reference, design decisions, ML models, deployment guide, and testing |
+| **[SLIOT_Backend_Documentation.pdf](./docs/SLIOT_Backend_Documentation.pdf)** | PDF version of the same document (export from Word) |
+| [RENDER_DEPLOYMENT.md](./RENDER_DEPLOYMENT.md) | Step-by-step Render + Supabase deployment guide |
+
+> To regenerate the Word document and diagrams locally: `python docs/generate_docs.py`
+
+---
+
 **Deploying to production?** See **[RENDER_DEPLOYMENT.md](./RENDER_DEPLOYMENT.md)** — Render deploy guide (database already on Supabase).
 
 ## Prerequisites
