@@ -13,6 +13,7 @@ APScheduler background tasks for the SLIOT platform.
 """
 
 import csv
+import hashlib
 import logging
 import os
 import sys
@@ -188,8 +189,11 @@ def run_forecast_job() -> None:
 
 def run_archive_job() -> None:
     """
-    Move sensor_readings older than RETENTION_DAYS (30) into
-    history_archive.csv (append) and delete them from the DB.
+    Move sensor_readings older than RETENTION_DAYS into history_archive.csv.
+
+    Deletion is disabled by default and requires ENABLE_READING_DELETION=true.
+    Before deletion, a row-count and checksum verification is performed against
+    the just-appended archive batch.
     """
     logger.info("[archive_job] Starting")
     db: Session = SessionLocal()
@@ -205,7 +209,26 @@ def run_archive_job() -> None:
             logger.info("[archive_job] No readings older than %d days", RETENTION_DAYS)
             return
 
-        _write_archive(old)
+        expected_count = len(old)
+        expected_checksum = _compute_readings_checksum(old)
+        archived_at_marker = _write_archive(old)
+
+        verified = _verify_archive_batch(
+            archive_path=ARCHIVE_PATH,
+            archived_at_marker=archived_at_marker,
+            expected_count=expected_count,
+            expected_checksum=expected_checksum,
+        )
+        if not verified:
+            raise RuntimeError("Archive verification failed; aborting deletion")
+
+        if not _reading_deletion_enabled():
+            logger.warning(
+                "[archive_job] Archived %d readings but skipped deletion "
+                "(ENABLE_READING_DELETION is false)",
+                expected_count,
+            )
+            return
 
         ids = [r.id for r in old]
         db.query(SensorReading).filter(
@@ -214,7 +237,7 @@ def run_archive_job() -> None:
 
         db.commit()
         logger.info(
-            "[archive_job] Archived and deleted %d readings → %s",
+            "[archive_job] Archived, verified, and deleted %d readings -> %s",
             len(ids), ARCHIVE_PATH,
         )
 
@@ -225,8 +248,8 @@ def run_archive_job() -> None:
         db.close()
 
 
-def _write_archive(readings: list) -> None:
-    """Append rows to history_archive.csv, writing a header if the file is new."""
+def _write_archive(readings: list) -> str:
+    """Append rows to history_archive.csv and return this batch marker."""
     fieldnames = ["id", "sensor_id", "timestamp", "temperature", "archived_at"]
     file_exists = os.path.isfile(ARCHIVE_PATH)
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -245,6 +268,88 @@ def _write_archive(readings: list) -> None:
                     "archived_at": now_iso,
                 }
             )
+
+    return now_iso
+
+
+def _reading_deletion_enabled() -> bool:
+    """Read deletion toggle from environment (safe default: disabled)."""
+    return os.getenv("ENABLE_READING_DELETION", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _reading_checksum_parts(
+    reading_id: int,
+    sensor_id: int,
+    timestamp_iso: str,
+    temperature: float,
+) -> str:
+    return f"{reading_id}|{sensor_id}|{timestamp_iso}|{float(temperature):.6f}"
+
+
+def _compute_readings_checksum(readings: list[SensorReading]) -> str:
+    digest = hashlib.sha256()
+    for r in readings:
+        digest.update(
+            _reading_checksum_parts(
+                reading_id=r.id,
+                sensor_id=r.sensor_id,
+                timestamp_iso=r.timestamp.isoformat(),
+                temperature=r.temperature,
+            ).encode("utf-8")
+        )
+    return digest.hexdigest()
+
+
+def _verify_archive_batch(
+    archive_path: str,
+    archived_at_marker: str,
+    expected_count: int,
+    expected_checksum: str,
+) -> bool:
+    if not os.path.isfile(archive_path):
+        logger.error("[archive_job] Archive file not found: %s", archive_path)
+        return False
+
+    digest = hashlib.sha256()
+    matched_rows = 0
+
+    with open(archive_path, "r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row.get("archived_at") != archived_at_marker:
+                continue
+            matched_rows += 1
+            digest.update(
+                _reading_checksum_parts(
+                    reading_id=int(row["id"]),
+                    sensor_id=int(row["sensor_id"]),
+                    timestamp_iso=row["timestamp"],
+                    temperature=float(row["temperature"]),
+                ).encode("utf-8")
+            )
+
+    actual_checksum = digest.hexdigest()
+    if matched_rows != expected_count:
+        logger.error(
+            "[archive_job] Verification count mismatch: expected=%d actual=%d",
+            expected_count,
+            matched_rows,
+        )
+        return False
+    if actual_checksum != expected_checksum:
+        logger.error(
+            "[archive_job] Verification checksum mismatch: expected=%s actual=%s",
+            expected_checksum,
+            actual_checksum,
+        )
+        return False
+
+    return True
 
 
 # ── Scheduler factory ──────────────────────────────────────────────────────────

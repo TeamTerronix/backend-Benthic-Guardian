@@ -36,7 +36,17 @@ from auth import (
     verify_password,
 )
 from database import SessionLocal, get_db, check_database_connection
-from models import Prediction, Sensor, SensorReading, User, UserRole, NetworkGroup, UserNetworkGroup
+from models import (
+    NetworkGroup,
+    Prediction,
+    Sensor,
+    SensorReading,
+    SystemAlert,
+    User,
+    UserNetworkGroup,
+    UserRole,
+)
+from dashboard_features import router as dashboard_router
 from scheduler import create_scheduler
 
 
@@ -186,6 +196,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(dashboard_router)
 
 # ─── Paths ───
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1111,9 +1122,31 @@ async def ingest_reading(
         temperature=payload.temperature,
     )
     db.add(reading)
+    persistent_alert = None
+    location_name = None
+    if payload.temperature >= BLEACHING_THRESHOLD:
+        location_name = (
+            sensor.network_group.name
+            if sensor.network_group and sensor.network_group.name
+            else sensor.sensor_uid
+        )
+        persistent_alert = SystemAlert(
+            sensor_id=sensor.id,
+            reading=reading,
+            network_group_id=sensor.network_group_id,
+            alert_type="critical",
+            status="open",
+            message=f"{location_name} recorded {payload.temperature:.1f}\u00b0C (bleaching threshold exceeded)",
+            temperature=payload.temperature,
+            risk_level=2,
+        )
+        db.add(persistent_alert)
+
     try:
         db.commit()
         db.refresh(reading)
+        if persistent_alert is not None:
+            db.refresh(persistent_alert)
     except IntegrityError:
         db.rollback()
         raise HTTPException(
@@ -1122,19 +1155,17 @@ async def ingest_reading(
         )
 
     # Broadcast bleaching alert to connected WS clients if threshold exceeded
-    if payload.temperature >= BLEACHING_THRESHOLD:
-        location_name = (
-            sensor.network_group.name
-            if sensor.network_group and sensor.network_group.name
-            else sensor.sensor_uid
-        )
+    if persistent_alert is not None:
         alert = {
             "type": "bleaching_alert",
+            "alert_id": persistent_alert.id,
             "sensor_id": sensor.id,
             "sensor_uid": sensor.sensor_uid,
             "location_name": location_name,
+            "message": persistent_alert.message,
             "temperature": round(payload.temperature, 2),
             "risk_level": 2,
+            "status": persistent_alert.status,
             "timestamp": reading.timestamp.isoformat(),
         }
         await manager.broadcast_alert(alert, sensor.network_group_id)

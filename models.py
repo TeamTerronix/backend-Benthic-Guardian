@@ -23,6 +23,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     DateTime,
+    Text,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -148,3 +149,45 @@ class Prediction(Base):
             f"ts={self.target_timestamp} temp={self.predicted_temp} "
             f"risk={self.risk_level} score={self.risk_score}>"
         )
+
+
+class SystemAlert(Base):
+    """Persistent operational alert created from a sensor reading."""
+
+    __tablename__ = "system_alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sensor_id = Column(Integer, ForeignKey("sensors.id"), nullable=True, index=True)
+    reading_id = Column(Integer, ForeignKey("sensor_readings.id", ondelete="SET NULL"), nullable=True, index=True)
+    network_group_id = Column(String, ForeignKey("network_groups.id"), nullable=True, index=True)
+    alert_type = Column(String, nullable=False, default="critical", index=True)
+    status = Column(String, nullable=False, default="open", index=True)
+    message = Column(Text, nullable=False)
+    temperature = Column(Float, nullable=True)
+    risk_level = Column(Integer, nullable=True)
+    assigned_to_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    acknowledged_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    sensor = relationship("Sensor", foreign_keys=[sensor_id])
+    reading = relationship("SensorReading", foreign_keys=[reading_id])
+    assigned_to = relationship("User", foreign_keys=[assigned_to_id])
+    acknowledged_by = relationship("User", foreign_keys=[acknowledged_by_id])
+
+
+class DashboardSettings(Base):
+    """Per-user dashboard preferences shared across browsers."""
+
+    __tablename__ = "dashboard_settings"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    unit = Column(String, nullable=False, default="celsius")
+    theme = Column(String, nullable=False, default="dark")
+    refresh_interval_sec = Column(Integer, nullable=False, default=300)
+    threshold_warning_c = Column(Float, nullable=False, default=28.0)
+    threshold_critical_c = Column(Float, nullable=False, default=29.0)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
