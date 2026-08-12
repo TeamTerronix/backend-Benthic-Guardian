@@ -184,6 +184,15 @@ curl -sS -X POST "http://127.0.0.1:8000/data" \
 
 ESP32: `reciever_single_temp.ino` POSTs to `/data` with sensor id + temperature only; time is stored on the server.
 
+### Archive retention safety
+
+Scheduled archival now supports a deletion safety switch:
+
+- `ENABLE_READING_DELETION=false` (default/safest): rows are archived, then **kept** in `sensor_readings`.
+- `ENABLE_READING_DELETION=true`: rows are deleted only after archive verification (count + checksum).
+
+Keep deletion disabled in production until your archive destination and DB backup/restore process are verified.
+
 ## 6. Run the API
 
 ```bash
