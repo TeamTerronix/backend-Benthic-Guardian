@@ -752,6 +752,168 @@ def get_risk_summary(
     }
 
 
+@app.get("/api/report")
+def get_report(
+    start: Optional[str] = Query(None, description="Start date ISO format"),
+    end: Optional[str] = Query(None, description="End date ISO format"),
+    format: str = Query("json", pattern="^(json|csv|pdf)$"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate a report payload for the dashboard with summary and dataset sections."""
+    start_dt = pd.to_datetime(start) if start else None
+    end_dt = pd.to_datetime(end) if end else None
+
+    sst_query = (
+        db.query(
+            SensorReading.timestamp.label("time"),
+            Sensor.sensor_uid.label("sensor_uid"),
+            Sensor.id.label("sensor_id"),
+            Sensor.latitude.label("latitude"),
+            Sensor.longitude.label("longitude"),
+            SensorReading.temperature.label("temperature"),
+        )
+        .join(Sensor, Sensor.id == SensorReading.sensor_id)
+        .filter(Sensor.latitude.isnot(None), Sensor.longitude.isnot(None))
+        .order_by(SensorReading.timestamp.desc())
+    )
+    if current_user.role != UserRole.admin:
+        network_ids = _user_network_ids(db, current_user)
+        if not network_ids:
+            return {
+                "summary": {
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "date_from": start or None,
+                    "date_to": end or None,
+                    "total_readings": 0,
+                    "total_predictions": 0,
+                    "total_dhw": 0,
+                    "average_temperature": None,
+                    "max_temperature": None,
+                },
+                "risk_summary": {
+                    "total_points": 0,
+                    "healthy": 0,
+                    "warning": 0,
+                    "danger": 0,
+                    "avg_temperature": None,
+                    "max_temperature": None,
+                    "avg_risk_score": None,
+                },
+                "datasets": {"sst": [], "dhw": [], "predictions": []},
+                "metadata": {"user": current_user.email, "role": current_user.role.value},
+            }
+        sst_query = sst_query.filter(Sensor.network_group_id.in_(network_ids))
+
+    if start_dt is not None:
+        sst_query = sst_query.filter(SensorReading.timestamp >= start_dt)
+    if end_dt is not None:
+        sst_query = sst_query.filter(SensorReading.timestamp <= end_dt)
+    sst_rows = [
+        {
+            "time": row.time.isoformat(),
+            "sensor_uid": row.sensor_uid,
+            "sensor_id": row.sensor_id,
+            "latitude": row.latitude,
+            "longitude": row.longitude,
+            "temperature": row.temperature,
+        }
+        for row in sst_query.limit(5000).all()
+    ]
+
+    dhw_query = (
+        db.query(SensorReading.timestamp, SensorReading.temperature)
+        .join(Sensor, Sensor.id == SensorReading.sensor_id)
+        .order_by(SensorReading.timestamp.asc())
+    )
+    if current_user.role != UserRole.admin:
+        dhw_query = dhw_query.filter(Sensor.network_group_id.in_(network_ids))
+    if start_dt is not None:
+        dhw_query = dhw_query.filter(SensorReading.timestamp >= start_dt)
+    if end_dt is not None:
+        dhw_query = dhw_query.filter(SensorReading.timestamp <= end_dt)
+    dhw_records = dhw_query.limit(5000).all()
+    if dhw_records:
+        dhw_df = pd.DataFrame([{"time": r.timestamp, "temperature": r.temperature} for r in dhw_records])
+        dhw_df["time"] = pd.to_datetime(dhw_df["time"], utc=True)
+        dhw_df = dhw_df.sort_values("time")
+        dhw_df["hotspot"] = (dhw_df["temperature"] - 30.0).clip(lower=0.0)
+        dhw_df["dhw"] = dhw_df["hotspot"].rolling(window=24 * 7, min_periods=1).sum() / 7.0
+        dhw_rows = [
+            {"time": t.isoformat(), "dhw": float(v)}
+            for t, v in zip(dhw_df["time"].tolist(), dhw_df["dhw"].tolist())
+        ]
+    else:
+        dhw_rows = []
+
+    prediction_query = db.query(Prediction).order_by(Prediction.target_timestamp.asc())
+    if current_user.role != UserRole.admin:
+        prediction_query = prediction_query.join(Sensor, Sensor.id == Prediction.sensor_id).filter(
+            Sensor.network_group_id.in_(network_ids)
+        )
+    if start_dt is not None:
+        prediction_query = prediction_query.filter(Prediction.target_timestamp >= start_dt)
+    if end_dt is not None:
+        prediction_query = prediction_query.filter(Prediction.target_timestamp <= end_dt)
+    prediction_rows = [
+        {
+            "sensor_id": p.sensor_id,
+            "target_timestamp": p.target_timestamp.isoformat(),
+            "predicted_temp": p.predicted_temp,
+            "risk_level": p.risk_level,
+            "risk_score": p.risk_score,
+            "anomaly": p.anomaly,
+            "days_stressed": p.days_stressed,
+            "warming_rate": p.warming_rate,
+            "physics_residual": p.physics_residual,
+        }
+        for p in prediction_query.limit(5000).all()
+    ]
+
+    temperatures = [float(item["temperature"]) for item in sst_rows if item.get("temperature") is not None]
+    risk_summary = {
+        "total_points": len(prediction_rows),
+        "healthy": sum(1 for item in prediction_rows if item.get("risk_level") == 0),
+        "warning": sum(1 for item in prediction_rows if item.get("risk_level") == 1),
+        "danger": sum(1 for item in prediction_rows if item.get("risk_level") == 2),
+        "avg_temperature": round(sum(temperatures) / len(temperatures), 2) if temperatures else None,
+        "max_temperature": round(max(temperatures), 2) if temperatures else None,
+        "avg_risk_score": round(
+            sum(float(item["risk_score"]) for item in prediction_rows if item.get("risk_score") is not None)
+            / max(1, sum(1 for item in prediction_rows if item.get("risk_score") is not None)),
+            4,
+        ) if any(item.get("risk_score") is not None for item in prediction_rows) else None,
+    }
+
+    report = {
+        "summary": {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "date_from": start_dt.isoformat() if start_dt is not None else None,
+            "date_to": end_dt.isoformat() if end_dt is not None else None,
+            "total_readings": len(sst_rows),
+            "total_predictions": len(prediction_rows),
+            "total_dhw": len(dhw_rows),
+            "average_temperature": risk_summary["avg_temperature"],
+            "max_temperature": risk_summary["max_temperature"],
+        },
+        "risk_summary": risk_summary,
+        "datasets": {
+            "sst": sst_rows,
+            "dhw": dhw_rows,
+            "predictions": prediction_rows,
+        },
+        "metadata": {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_by": current_user.email,
+            "role": current_user.role.value,
+            "date_from": start_dt.isoformat() if start_dt is not None else None,
+            "date_to": end_dt.isoformat() if end_dt is not None else None,
+            "format": format,
+        },
+    }
+    return report
+
+
 # ─── Auth Routes ──────────────────────────────────────────────────────────────
 
 @app.post("/auth/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
