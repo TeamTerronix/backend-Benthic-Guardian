@@ -16,7 +16,7 @@ import pandas as pd
 import uuid
 
 from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field, field_validator
@@ -752,15 +752,57 @@ def get_risk_summary(
     }
 
 
-@app.get("/api/report")
-def get_report(
-    start: Optional[str] = Query(None, description="Start date ISO format"),
-    end: Optional[str] = Query(None, description="End date ISO format"),
-    format: str = Query("json", pattern="^(json|csv|pdf)$"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Generate a report payload for the dashboard with summary and dataset sections."""
+def _empty_report_payload(
+    *,
+    current_user: User,
+    start: Optional[str],
+    end: Optional[str],
+    export_format: str,
+) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "summary": {
+            "generated_at": now,
+            "date_from": start or None,
+            "date_to": end or None,
+            "total_readings": 0,
+            "total_predictions": 0,
+            "total_dhw": 0,
+            "average_temperature": None,
+            "max_temperature": None,
+        },
+        "risk_summary": {
+            "total_points": 0,
+            "healthy": 0,
+            "warning": 0,
+            "danger": 0,
+            "avg_temperature": None,
+            "max_temperature": None,
+            "avg_risk_score": None,
+        },
+        "datasets": {"sst": [], "dhw": [], "predictions": []},
+        "metadata": {
+            "generated_at": now,
+            "generated_by": current_user.email,
+            "user": current_user.email,
+            "role": current_user.role.value,
+            "date_from": start or None,
+            "date_to": end or None,
+            "format": export_format,
+            "product": "Benthic Guardian",
+        },
+    }
+
+
+def _build_report_payload(
+    *,
+    current_user: User,
+    db: Session,
+    start: Optional[str],
+    end: Optional[str],
+    export_format: str,
+) -> dict:
+    """Assemble the report JSON used by the dashboard and server-side PDF builder."""
     start_dt = pd.to_datetime(start) if start else None
     end_dt = pd.to_datetime(end) if end else None
 
@@ -777,32 +819,16 @@ def get_report(
         .filter(Sensor.latitude.isnot(None), Sensor.longitude.isnot(None))
         .order_by(SensorReading.timestamp.desc())
     )
+    network_ids: Optional[list[str]] = None
     if current_user.role != UserRole.admin:
         network_ids = _user_network_ids(db, current_user)
         if not network_ids:
-            return {
-                "summary": {
-                    "generated_at": datetime.now(timezone.utc).isoformat(),
-                    "date_from": start or None,
-                    "date_to": end or None,
-                    "total_readings": 0,
-                    "total_predictions": 0,
-                    "total_dhw": 0,
-                    "average_temperature": None,
-                    "max_temperature": None,
-                },
-                "risk_summary": {
-                    "total_points": 0,
-                    "healthy": 0,
-                    "warning": 0,
-                    "danger": 0,
-                    "avg_temperature": None,
-                    "max_temperature": None,
-                    "avg_risk_score": None,
-                },
-                "datasets": {"sst": [], "dhw": [], "predictions": []},
-                "metadata": {"user": current_user.email, "role": current_user.role.value},
-            }
+            return _empty_report_payload(
+                current_user=current_user,
+                start=start,
+                end=end,
+                export_format=export_format,
+            )
         sst_query = sst_query.filter(Sensor.network_group_id.in_(network_ids))
 
     if start_dt is not None:
@@ -826,7 +852,7 @@ def get_report(
         .join(Sensor, Sensor.id == SensorReading.sensor_id)
         .order_by(SensorReading.timestamp.asc())
     )
-    if current_user.role != UserRole.admin:
+    if network_ids is not None:
         dhw_query = dhw_query.filter(Sensor.network_group_id.in_(network_ids))
     if start_dt is not None:
         dhw_query = dhw_query.filter(SensorReading.timestamp >= start_dt)
@@ -847,7 +873,7 @@ def get_report(
         dhw_rows = []
 
     prediction_query = db.query(Prediction).order_by(Prediction.target_timestamp.asc())
-    if current_user.role != UserRole.admin:
+    if network_ids is not None:
         prediction_query = prediction_query.join(Sensor, Sensor.id == Prediction.sensor_id).filter(
             Sensor.network_group_id.in_(network_ids)
         )
@@ -882,12 +908,15 @@ def get_report(
             sum(float(item["risk_score"]) for item in prediction_rows if item.get("risk_score") is not None)
             / max(1, sum(1 for item in prediction_rows if item.get("risk_score") is not None)),
             4,
-        ) if any(item.get("risk_score") is not None for item in prediction_rows) else None,
+        )
+        if any(item.get("risk_score") is not None for item in prediction_rows)
+        else None,
     }
 
-    report = {
+    now = datetime.now(timezone.utc).isoformat()
+    return {
         "summary": {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": now,
             "date_from": start_dt.isoformat() if start_dt is not None else None,
             "date_to": end_dt.isoformat() if end_dt is not None else None,
             "total_readings": len(sst_rows),
@@ -903,14 +932,55 @@ def get_report(
             "predictions": prediction_rows,
         },
         "metadata": {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": now,
             "generated_by": current_user.email,
+            "user": current_user.email,
             "role": current_user.role.value,
             "date_from": start_dt.isoformat() if start_dt is not None else None,
             "date_to": end_dt.isoformat() if end_dt is not None else None,
-            "format": format,
+            "format": export_format,
+            "product": "Benthic Guardian",
         },
     }
+
+
+@app.get("/api/report")
+def get_report(
+    start: Optional[str] = Query(None, description="Start date ISO format"),
+    end: Optional[str] = Query(None, description="End date ISO format"),
+    format: str = Query("json", pattern="^(json|csv|pdf)$"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate a monitoring report.
+
+    - ``format=json`` / ``csv``: JSON payload (dashboard builds CSV client-side).
+    - ``format=pdf``: branded PDF bytes generated on the server (Benthic Guardian theme).
+    """
+    report = _build_report_payload(
+        current_user=current_user,
+        db=db,
+        start=start,
+        end=end,
+        export_format=format,
+    )
+    if format == "pdf":
+        from report_pdf import build_report_pdf  # noqa: PLC0415
+
+        try:
+            pdf_bytes = build_report_pdf(report)
+        except Exception as exc:
+            logger.exception("PDF report generation failed")
+            raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}") from exc
+
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+        filename = f"benthic-guardian-report-{stamp}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     return report
 
 

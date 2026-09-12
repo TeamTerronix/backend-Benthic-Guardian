@@ -44,3 +44,34 @@ def test_report_generation_returns_summary_data(client, auth_headers, approved_s
     assert payload["risk_summary"]["warning"] >= 1 or payload["risk_summary"]["danger"] >= 0
     assert payload["datasets"]["sst"][0]["temperature"] == 30.8
     assert payload["datasets"]["predictions"][0]["risk_score"] == 0.72
+    assert payload["metadata"]["product"] == "Benthic Guardian"
+
+
+def test_report_pdf_generated_on_server(client, auth_headers, approved_sensor, db):
+    now = datetime.now(timezone.utc)
+    db.add(
+        SensorReading(
+            sensor_id=approved_sensor.id,
+            timestamp=now - timedelta(hours=2),
+            temperature=29.4,
+        )
+    )
+    db.commit()
+
+    response = client.get(
+        "/api/report",
+        headers=auth_headers,
+        params={
+            "start": (now - timedelta(days=1)).isoformat(),
+            "end": (now + timedelta(days=1)).isoformat(),
+            "format": "pdf",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert response.content[:4] == b"%PDF"
+    assert len(response.content) > 1000
+    # Product name must appear; SLIOT must not.
+    assert b"Benthic Guardian" in response.content
+    assert b"SLIOT" not in response.content
