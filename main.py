@@ -1553,6 +1553,31 @@ def get_sensor_forecast(
     )
 
 
+@app.get("/api/model-performance")
+def get_model_performance(
+    model: str = Query("PINN", description="PINN | LSTM | Ensemble"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Live evaluation metrics for the Predictions page.
+
+    PINN compares stored forecasts to observed readings (hourly match).
+    LSTM re-issues a past forecast and scores +1/+3/+7d against daily means.
+    Ensemble averages available PINN/LSTM scores; physics_loss from PINN only.
+    """
+    from model_performance import evaluate_model  # noqa: PLC0415
+
+    key = (model or "PINN").strip().upper()
+    if key not in {"PINN", "LSTM", "ENSEMBLE"}:
+        raise HTTPException(status_code=400, detail="model must be PINN, LSTM, or Ensemble")
+    try:
+        return evaluate_model(db, current_user, key)
+    except Exception as exc:
+        logger.exception("model performance failed for %s", key)
+        raise HTTPException(status_code=500, detail=f"Model performance failed: {exc}") from exc
+
+
 # ── ANN–LSTM short-term forecast (1 / 3 / 7 day) ──────────────────────────────
 
 class LSTMForecastPoint(BaseModel):
