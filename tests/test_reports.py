@@ -3,8 +3,7 @@ from datetime import datetime, timedelta, timezone
 from models import Prediction, SensorReading
 
 
-def test_report_generation_returns_summary_data(client, auth_headers, approved_sensor, db):
-    now = datetime.now(timezone.utc)
+def _seed_report_rows(db, approved_sensor, now):
     db.add(
         SensorReading(
             sensor_id=approved_sensor.id,
@@ -27,6 +26,11 @@ def test_report_generation_returns_summary_data(client, auth_headers, approved_s
     )
     db.commit()
 
+
+def test_report_json_download_from_server(client, auth_headers, approved_sensor, db):
+    now = datetime.now(timezone.utc)
+    _seed_report_rows(db, approved_sensor, now)
+
     response = client.get(
         "/api/report",
         headers=auth_headers,
@@ -38,13 +42,43 @@ def test_report_generation_returns_summary_data(client, auth_headers, approved_s
     )
 
     assert response.status_code == 200, response.text
+    assert "attachment" in response.headers.get("content-disposition", "")
+    assert "application/json" in response.headers.get("content-type", "")
     payload = response.json()
+    assert payload["product"] == "Benthic Guardian"
     assert payload["summary"]["total_readings"] >= 1
     assert payload["summary"]["total_predictions"] >= 1
-    assert payload["risk_summary"]["warning"] >= 1 or payload["risk_summary"]["danger"] >= 0
-    assert payload["datasets"]["sst"][0]["temperature"] == 30.8
-    assert payload["datasets"]["predictions"][0]["risk_score"] == 0.72
+    assert payload["data"]["sst"][0]["temperature"] == 30.8
+    assert payload["data"]["predictions"][0]["risk_score"] == 0.72
     assert payload["metadata"]["product"] == "Benthic Guardian"
+
+
+def test_report_csv_download_from_server(client, auth_headers, approved_sensor, db):
+    now = datetime.now(timezone.utc)
+    _seed_report_rows(db, approved_sensor, now)
+
+    response = client.get(
+        "/api/report",
+        headers=auth_headers,
+        params={
+            "start": (now - timedelta(days=2)).isoformat(),
+            "end": (now + timedelta(days=2)).isoformat(),
+            "format": "csv",
+            "include_sst": True,
+            "include_dhw": False,
+            "include_predictions": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert "text/csv" in response.headers.get("content-type", "")
+    assert "attachment" in response.headers.get("content-disposition", "")
+    text = response.content.decode("utf-8-sig")
+    assert "Benthic Guardian" in text or "product: Benthic Guardian" in text
+    assert "dataset" in text
+    assert "sst" in text
+    assert "30.8" in text
+    assert "SLIOT" not in text
 
 
 def test_report_pdf_generated_on_server(client, auth_headers, approved_sensor, db):
@@ -72,6 +106,5 @@ def test_report_pdf_generated_on_server(client, auth_headers, approved_sensor, d
     assert response.headers["content-type"].startswith("application/pdf")
     assert response.content[:4] == b"%PDF"
     assert len(response.content) > 1000
-    # Product name must appear; SLIOT must not.
     assert b"Benthic Guardian" in response.content
     assert b"SLIOT" not in response.content

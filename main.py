@@ -949,15 +949,31 @@ def get_report(
     start: Optional[str] = Query(None, description="Start date ISO format"),
     end: Optional[str] = Query(None, description="End date ISO format"),
     format: str = Query("json", pattern="^(json|csv|pdf)$"),
+    include_sst: bool = Query(True),
+    include_dhw: bool = Query(True),
+    include_predictions: bool = Query(True),
+    include_metadata: bool = Query(True),
+    download: bool = Query(
+        True,
+        description="If true, return a file attachment. If false and format=json, return inline API JSON.",
+    ),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Generate a monitoring report.
+    Generate a monitoring report on the server.
 
-    - ``format=json`` / ``csv``: JSON payload (dashboard builds CSV client-side).
-    - ``format=pdf``: branded PDF bytes generated on the server (Benthic Guardian theme).
+    - ``format=json`` + ``download=true`` → downloadable JSON file
+    - ``format=json`` + ``download=false`` → inline JSON (for API clients)
+    - ``format=csv`` → downloadable CSV
+    - ``format=pdf`` → branded PDF (Benthic Guardian theme)
     """
+    from report_export import (  # noqa: PLC0415
+        build_report_csv,
+        build_report_json,
+        filter_report_datasets,
+    )
+
     report = _build_report_payload(
         current_user=current_user,
         db=db,
@@ -965,6 +981,17 @@ def get_report(
         end=end,
         export_format=format,
     )
+    report = filter_report_datasets(
+        report,
+        include_sst=include_sst,
+        include_dhw=include_dhw,
+        include_predictions=include_predictions,
+        include_metadata=include_metadata,
+    )
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    basename = f"benthic-guardian-report-{stamp}"
+
     if format == "pdf":
         from report_pdf import build_report_pdf  # noqa: PLC0415
 
@@ -973,15 +1000,39 @@ def get_report(
         except Exception as exc:
             logger.exception("PDF report generation failed")
             raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}") from exc
-
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
-        filename = f"benthic-guardian-report-{stamp}.pdf"
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": f'attachment; filename="{basename}.pdf"'},
         )
-    return report
+
+    if format == "csv":
+        try:
+            csv_bytes = build_report_csv(report)
+        except Exception as exc:
+            logger.exception("CSV report generation failed")
+            raise HTTPException(status_code=500, detail=f"CSV generation failed: {exc}") from exc
+        return Response(
+            content=csv_bytes,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{basename}.csv"'},
+        )
+
+    # JSON
+    if not download:
+        # Inline API shape (datasets key) for programmatic clients
+        return report
+
+    try:
+        json_bytes = build_report_json(report)
+    except Exception as exc:
+        logger.exception("JSON report generation failed")
+        raise HTTPException(status_code=500, detail=f"JSON generation failed: {exc}") from exc
+    return Response(
+        content=json_bytes,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{basename}.json"'},
+    )
 
 
 # ─── Auth Routes ──────────────────────────────────────────────────────────────
