@@ -21,3 +21,6 @@ python-jose[cryptography]>=3.3.0
 
 # Scheduling
 apscheduler>=3.10.0
+
+# PDF reports (server-side Benthic Guardian branded exports)
+reportlab>=4.0.0
